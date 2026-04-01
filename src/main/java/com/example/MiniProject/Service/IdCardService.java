@@ -1,6 +1,7 @@
 package com.example.MiniProject.Service;
 
 
+import com.example.MiniProject.Dto.IdCardSummaryDto;
 import com.example.MiniProject.Dto.Requests.IdCardRequestDto;
 import com.example.MiniProject.Dto.Responses.IdCardResponseDto;
 import com.example.MiniProject.Entity.IdCard;
@@ -9,11 +10,21 @@ import com.example.MiniProject.Mapper.IdCardMapper;
 import com.example.MiniProject.Repository.IdCardRepo;
 import com.example.MiniProject.Repository.StudentRepo;
 import com.example.MiniProject.Response.ApiResponse;
+import com.example.MiniProject.Response.PageResponse;
+import com.example.MiniProject.Specification.IdCardSpecification;
+import com.example.MiniProject.Utils.PaginationUtil;
+import com.example.MiniProject.config.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 @Service
@@ -24,177 +35,336 @@ public class IdCardService {
 
     private final IdCardRepo idCardRepo;
 
-   private final StudentRepo studentRepo;
+    private final StudentRepo studentRepo;
 
     private final IdCardMapper idCardMapper;
+    public ApiResponse<IdCardResponseDto> addIdCard(
+            Long studentId,
+            IdCardRequestDto dto) {
 
-    public ApiResponse<IdCardResponseDto> addIdCard(Long studId,IdCardRequestDto idCardRequestDto) {
         try {
-            log.info("Attemting to add idcard for student");
-            if(studId==null){
+
+            if (studentId == null) {
                 return new ApiResponse<>(
                         false,
                         HttpStatus.BAD_REQUEST,
-                        "Student id is Required to add id card",
+                        "Student id is required",
                         null,
                         LocalDateTime.now()
                 );
             }
-            Student student = studentRepo.findById(studId)
-                    .orElseThrow(() -> new RuntimeException("Student not found with studid:"));
+
+            String tenantId = TenantContext.getTenant();
+
+            log.info("Issuing IdCard for student {} under tenant {}", studentId, tenantId);
+
+            Student student = studentRepo
+                    .findByStudIdAndTenantId(studentId, tenantId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Student not found for this tenant"));
+
+            if (!student.isActive()) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Cannot issue IdCard to inactive student",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
 
             if (student.getIdCard() != null) {
                 return new ApiResponse<>(
                         false,
-                        HttpStatus.CONFLICT,
-                        "Student already assiged an idcard",
+                        HttpStatus.BAD_REQUEST,
+                        "Student already has an IdCard",
                         null,
                         LocalDateTime.now()
                 );
             }
-            IdCard idcard = idCardMapper.toEntity(idCardRequestDto);
 
-            idcard.setStudent(student);
-            student.setIdCard(idcard);
-            Student savedstudent = studentRepo.save(student);
-            IdCardResponseDto response = idCardMapper.toDto(savedstudent.getIdCard());
-            log.info("idcard added successfully");
-            return new ApiResponse<>(
-                    true,
-                    HttpStatus.CREATED,
-                    "Successfully idcard Added to Student ",
-                    response,
-                    LocalDateTime.now()
-            );
-        }catch (RuntimeException e){
-            log.warn("failed to add idcard to student");
-            return new ApiResponse<>(
-                    false,
-                    HttpStatus.NOT_FOUND,
-                    e.getMessage(),
-                    null,
-                    LocalDateTime.now()
-            );
-        } catch (Exception e) {
-           log.warn("failed to add idcard to student");
-           return new ApiResponse<>(
-                   false,
-                   HttpStatus.INTERNAL_SERVER_ERROR,
-                   e.getMessage(),
-                   null,
-                   LocalDateTime.now()
-           );
-        }
-    }
+            String cardNumber = dto.getCardNumber().trim().toUpperCase();
 
-    public ApiResponse<List<IdCardResponseDto>> getAllIdCards() {
-        try {
-            log.info("trying to fetch id card details");
-            List<IdCard> idCardList = idCardRepo.findAll();
-            List<IdCardResponseDto> response= idCardMapper.toDtoList(idCardList);
-            log.info("total idcards fetched {}",response.size());
-            return new ApiResponse<List<IdCardResponseDto>>(
-                    true,
-                    HttpStatus.OK,
-                    "Idcards fetched successfully",
-                    response,
-                    LocalDateTime.now()
-            );
-        }catch (RuntimeException e){
-            log.warn("failed to fetch idcards");
-            return new ApiResponse<>(
-                    false,
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    e.getMessage(),
-                    null,
-                    LocalDateTime.now()
+            if (idCardRepo.existsByCardNumberAndTenantId(cardNumber, tenantId)) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.CONFLICT,
+                        "Card number already exists for this tenant",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
 
-            );
-        }
-    }
-
-    public ApiResponse<IdCardResponseDto> getIdCardById(Long id) {
-        try {
-            log.info("trying to fetch Idcard usind id {}", id);
-            IdCard idcard = idCardRepo.findById(id)
-                    .orElseThrow(() -> new RuntimeException("idcard not found"));
-
-            IdCardResponseDto response = idCardMapper.toDto(idcard);
-            return new ApiResponse<>(
-                    true,
-                    HttpStatus.OK,
-                    "Idcard fetched succesfully",
-                    response,
-                    LocalDateTime.now()
-            );
-        } catch (RuntimeException e) {
-            log.warn("failed to load idcard");
-            return new ApiResponse<>(
-                    false,
-                    HttpStatus.NOT_FOUND,
-                    e.getMessage(),
-                    null,
-                    LocalDateTime.now()
-
-            );
-        } catch (Exception e) {
-            return new ApiResponse<>(
-                    false,
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    e.getMessage(),
-                    null,
-                    LocalDateTime.now()
-            );
-        }
-    }
-
-    public ApiResponse<IdCardResponseDto> updateIdCard(
-            Long studId,
-            Long id,
-            IdCardRequestDto idCardRequestDto) {
-
-        log.info("Updating IdCard with id {}", id);
-
-        try {
-
-            if (studId == null) {
+            if (dto.getIssueDate().isBefore(student.getAdmissionDate())) {
                 return new ApiResponse<>(
                         false,
                         HttpStatus.BAD_REQUEST,
-                        "StudentId must be provided",
+                        "Issue date cannot be before admission date",
                         null,
                         LocalDateTime.now()
                 );
             }
 
-            Student student = studentRepo.findById(studId)
+            if (dto.getIssueDate().isAfter(LocalDate.now())) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Issue date cannot be in the future",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            LocalDate expiryDate = student.getGraduationDate();
+
+            IdCard idCard = idCardMapper.toEntity(dto);
+
+            idCard.setCardNumber(cardNumber);
+            idCard.setExpiryDate(expiryDate);
+            idCard.setActive(true);
+            idCard.setStudent(student);
+
+            student.setIdCard(idCard);
+
+            IdCard saved = idCardRepo.save(idCard);
+
+            log.info("IdCard issued successfully with id {}", saved.getId());
+
+            return new ApiResponse<>(
+                    true,
+                    HttpStatus.CREATED,
+                    "IdCard created successfully",
+                    idCardMapper.toDto(saved),
+                    LocalDateTime.now()
+            );
+
+        } catch (RuntimeException e) {
+
+            log.warn("IdCard creation failed: {}", e.getMessage());
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.NOT_FOUND,
+                    e.getMessage(),
+                    null,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
+            log.error("Unexpected error while creating IdCard", e);
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Something went wrong while creating IdCard",
+                    null,
+                    LocalDateTime.now()
+            );
+        }
+    }
+    public ApiResponse<List<IdCardResponseDto>> getAllIdCards() {
+
+        try {
+            log.info("Trying to fetch all IdCards");
+
+            String tenantId = TenantContext.getTenant();
+
+            if (tenantId == null || tenantId.isBlank()) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Tenant header is missing",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            List<IdCard> idCards = idCardRepo.findAllByTenantId(tenantId);
+
+            for (IdCard idCard : idCards) {
+
+                if (idCard.getExpiryDate() != null &&
+                        idCard.getExpiryDate().isBefore(LocalDate.now())) {
+
+                    idCard.setActive(false);
+                    idCardRepo.save(idCard);
+                }
+            }
+
+            log.info("Number of IdCards available for tenant {}: {}", tenantId, idCards.size());
+
+            List<IdCardResponseDto> response =
+                    idCardMapper.toDtoList(idCards);
+
+            log.info("IdCards fetched successfully");
+
+            return new ApiResponse<>(
+                    true,
+                    HttpStatus.OK,
+                    "IdCards fetched successfully",
+                    response,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
+            log.error("Failed to fetch IdCards", e);
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to fetch IdCards",
+                    null,
+                    LocalDateTime.now()
+            );
+        }
+    }
+    public ApiResponse<IdCardResponseDto> getIdCardById(Long id) {
+
+        try {
+
+            log.info("Trying to fetch IdCard using id {}", id);
+
+            if (id == null) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "IdCard id must not be null",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            String tenantId = TenantContext.getTenant();
+
+            IdCard idCard = idCardRepo
+                    .findByIdAndTenantId(id, tenantId)
+                    .orElseThrow(()->
+                            new RuntimeException("IdCard not found for this tenant"));
+            IdCardResponseDto response = idCardMapper.toDto(idCard);
+
+            log.info("IdCard fetched successfully for tenant {}", tenantId);
+
+            return new ApiResponse<>(
+                    true,
+                    HttpStatus.OK,
+                    "IdCard fetched successfully",
+                    response,
+                    LocalDateTime.now()
+            );
+
+        } catch (RuntimeException e) {
+
+            log.warn("IdCard not found with id {}", id);
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.NOT_FOUND,
+                    e.getMessage(),
+                    null,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
+            log.error("Unexpected error while fetching IdCard", e);
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to fetch IdCard",
+                    null,
+                    LocalDateTime.now()
+            );
+        }
+    }
+    public ApiResponse<IdCardResponseDto> updateIdCard(
+            Long id,
+            IdCardRequestDto dto) {
+
+        try {
+
+            if (id == null) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "IdCard id must not be null",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            String tenantId = TenantContext.getTenant();
+
+            IdCard existing = idCardRepo
+                    .findByIdAndTenantId(id, tenantId)
                     .orElseThrow(() ->
-                            new RuntimeException("Student not found with id " + studId));
+                            new RuntimeException("IdCard not found for this tenant"));
 
-            IdCard existingCard = idCardRepo.findById(id)
-                    .orElseThrow(() ->
-                            new RuntimeException("IdCard not found with id " + id));
+            Student student = existing.getStudent();
 
-            existingCard.setStandard(idCardRequestDto.getStandard());
-            existingCard.setSection(idCardRequestDto.getSection());
-            existingCard.setAddress(idCardRequestDto.getAddress());
-            existingCard.setStudent(student);
+            if (existing.getExpiryDate() != null &&
+                    existing.getExpiryDate().isBefore(LocalDate.now())) {
 
-            IdCard updatedCard = idCardRepo.save(existingCard);
+                existing.setActive(false);
 
-            IdCardResponseDto response = idCardMapper.toDto(updatedCard);
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Expired IdCard cannot be modified",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            if (dto.getIssueDate() == null) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Issue date is required",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            if (dto.getIssueDate().isBefore(student.getAdmissionDate())) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Issue date cannot be before student admission date",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            if (dto.getIssueDate().isAfter(LocalDate.now())) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Issue date cannot be after today",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            existing.setStandard(dto.getStandard());
+            existing.setSection(dto.getSection());
+            existing.setAddress(dto.getAddress());
+            existing.setIssueDate(dto.getIssueDate());
+            existing.setExpiryDate(student.getGraduationDate());
+
+            IdCard saved = idCardRepo.save(existing);
 
             return new ApiResponse<>(
                     true,
                     HttpStatus.OK,
                     "IdCard updated successfully",
-                    response,
+                    idCardMapper.toDto(saved),
                     LocalDateTime.now()
             );
 
         } catch (RuntimeException e) {
-
-            log.warn("Update failed: {}", e.getMessage());
 
             return new ApiResponse<>(
                     false,
@@ -206,58 +376,213 @@ public class IdCardService {
 
         } catch (Exception e) {
 
-            log.error("Unexpected error while updating IdCard", e);
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Something went wrong while updating IdCard",
+                    null,
+                    LocalDateTime.now()
+            );
+        }
+    }
+    public ApiResponse<Void> deleteIdCard(Long idCardId) {
+
+        log.info("Attempting to delete id card with id {}", idCardId);
+
+        try {
+
+            if (idCardId == null) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "IdCard id is required",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            String tenantId = TenantContext.getTenant();
+
+            IdCard idCard = idCardRepo
+                    .findByIdAndTenantId(idCardId, tenantId)
+                    .orElseThrow(() ->
+                            new RuntimeException("IdCard not found for this tenant")
+                    );
+
+            Student student = idCard.getStudent();
+
+            if (student == null) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Associated student not found for this IdCard",
+                        null,
+                        LocalDateTime.now()
+                );
+            }
+
+            student.setIdCard(null);
+            studentRepo.save(student);
+
+            idCardRepo.delete(idCard);
+
+            log.info("IdCard deleted successfully with id {}", idCardId);
+
+            return new ApiResponse<>(
+                    true,
+                    HttpStatus.OK,
+                    "IdCard deleted successfully",
+                    null,
+                    LocalDateTime.now()
+            );
+
+        } catch (RuntimeException e) {
+
+            log.warn("IdCard deletion failed: {}", e.getMessage());
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.NOT_FOUND,
+                    e.getMessage(),
+                    null,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
+            log.error("Unexpected error while deleting IdCard", e);
 
             return new ApiResponse<>(
                     false,
                     HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Something went wrong",
+                    "Something went wrong while deleting IdCard",
                     null,
                     LocalDateTime.now()
             );
         }
     }
 
+    public ApiResponse<PageResponse<IdCardSummaryDto>> getAllIdCardsWithPagination(
+            int pageNo,
+            int pageSize,
+            String sortBy,
+            String sortDir,
+            Long id,
+            String cardNumber,
+            Boolean active,
+            LocalDate issueDate,
+            LocalDate expiryDate,
+            Long studentId) {
 
-    public ApiResponse<Void>  deleteIdCardById(Long id) {
-        try{
-            log.info("Attemptimg to delete studnet with id {}",id);
+        try {
+            String tenantId = TenantContext.getTenant();
 
-            IdCard exist=idCardRepo.findById(id)
-                    .orElseThrow(()-> new RuntimeException("Idcard not existed"));
-            Student student=exist.getStudent();
-            if(student!=null){
-                student.setIdCard(null);
-                studentRepo.save(student);
+            if (tenantId == null || tenantId.isBlank()) {
+                return new ApiResponse<>(
+                        false,
+                        HttpStatus.BAD_REQUEST,
+                        "Tenant header is missing",
+                        null,
+                        LocalDateTime.now()
+                );
             }
-            idCardRepo.deleteById(id);
-            log.info("idcard deleted successfully");
+
+            Pageable pageable = PaginationUtil.createPageable(
+                    pageNo,
+                    pageSize,
+                    sortBy,
+                    sortDir
+            );
+
+            Specification<IdCard> spec =
+                    IdCardSpecification.getSpecification(
+                            tenantId, id, cardNumber, active, issueDate, expiryDate, studentId
+                    );
+
+            Page<IdCard> page = idCardRepo.findAll(spec, pageable);
+
+            List<IdCardSummaryDto> dtoList =
+                    idCardMapper.toSummaryDtoList(page.getContent());
+
+            PageResponse<IdCardSummaryDto> pageResponse =
+                    new PageResponse<>(
+                            dtoList,
+                            page.getNumber(),
+                            page.getSize(),
+                            page.getTotalElements(),
+                            page.getTotalPages(),
+                            page.isLast()
+                    );
+
             return new ApiResponse<>(
-                true,
-                HttpStatus.OK,
-                "idcard deleted Successfully",
-                null,
-                LocalDateTime.now()
-        );
-        }
-    catch(RuntimeException e){
-        log.warn("Idcard with id is not found");
-        return new ApiResponse<>(
-                false,
-                HttpStatus.NOT_FOUND,
-                e.getMessage(),
-                null,
-                LocalDateTime.now()
-        );
-    }catch(Exception e){
-            log.warn("error while deletng student");
+                    true,
+                    HttpStatus.OK,
+                    "IdCards fetched successfully",
+                    pageResponse,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
             return new ApiResponse<>(
                     false,
                     HttpStatus.INTERNAL_SERVER_ERROR,
-                    e.getMessage(),
+                    "Failed to fetch IdCards",
                     null,
                     LocalDateTime.now()
             );
         }
-}
+    }
+
+    public ApiResponse<List<IdCardResponseDto>> getAllIdCardsWithTenants() {
+        try {
+
+            String tenantId = TenantContext.getTenant();
+
+            log.info("Fetching IdCards for tenant {}", tenantId);
+
+            List<IdCard> idCards = idCardRepo.findAllByTenantId(tenantId);
+
+            LocalDate today = LocalDate.now();
+
+            for (IdCard idCard : idCards) {
+
+                if (idCard.getExpiryDate() != null &&
+                        idCard.getExpiryDate().isBefore(today) &&
+                        idCard.isActive()) {
+
+                    idCard.setActive(false);
+                }
+            }
+
+            idCardRepo.saveAll(idCards);
+
+            log.info("Number of IdCards available for tenant {} : {}", tenantId, idCards.size());
+
+            List<IdCardResponseDto> response =
+                    idCardMapper.toDtoList(idCards);
+
+            log.info("IdCards fetched successfully");
+
+            return new ApiResponse<>(
+                    true,
+                    HttpStatus.OK,
+                    "IdCards fetched successfully",
+                    response,
+                    LocalDateTime.now()
+            );
+
+        } catch (Exception e) {
+
+            log.error("Failed to fetch IdCards", e);
+
+            return new ApiResponse<>(
+                    false,
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Failed to fetch IdCards",
+                    null,
+                    LocalDateTime.now()
+            );
+        }
+    }
 }

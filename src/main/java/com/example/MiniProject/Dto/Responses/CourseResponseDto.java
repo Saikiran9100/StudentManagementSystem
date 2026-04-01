@@ -16,6 +16,9 @@ public class CourseResponseDto {
 
     private Long courseId;
     private String courseName;
+    private Double courseFee;
+    private Integer maxCapacity;
+    private String tenantId;
     private List<StudentSummaryDto> students;
 
 }

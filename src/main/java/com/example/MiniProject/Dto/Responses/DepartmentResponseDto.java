@@ -15,6 +15,8 @@ public class DepartmentResponseDto {
 
     private Long deptId;
     private String deptName;
-
+    private String deptCode;
+    private Long capacity;
+    private String tenantId;
     private List<StudentSummaryDto> students;
 }

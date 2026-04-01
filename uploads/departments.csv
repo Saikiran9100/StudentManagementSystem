@@ -1,0 +1,14 @@
+deptName,deptCode,capacity
+Computer Science and Engineering,CSE,240
+Artificial Intelligence,AI,180
+Information Technology,IT,180
+Electronics and Communication Engineering,ECE,240
+Electrical and Electronics Engineering,EEE,180
+Mechanical Engineering,MECH,240
+Civil Engineering,CIVIL,180
+Biotechnology,BT,120
+Chemical Engineering,CHE,120
+Aeronautical Engineering,AERO,60
+Automobile Engineering,AUTO,60
+Mining Engineering,MIN,60
+Metallurgical Engineering,MET,60

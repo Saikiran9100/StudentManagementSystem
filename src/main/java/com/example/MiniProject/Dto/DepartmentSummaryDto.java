@@ -12,6 +12,8 @@ public class DepartmentSummaryDto {
 
     private Long deptId;
     private String deptName;
+    private String deptCode;
+
 }
 
 
